@@ -7,6 +7,7 @@ import requests
 from lxml import etree
 import sys
 import json
+import asyncio
 
 from concurrent import futures
 
@@ -146,6 +147,15 @@ def main():
     jpg_list = get_img_urls(htmls_urls=htmls_urls)
     # print(jpg_list)
     ff = dowload_many(jpg_list)
+
+# 第一步，获取第一页的url
+async  def main():
+    URL = 'https://www.tooopen.com/img/88_878.aspx'
+    text = get_url(url=URL)
+    html = get_html(text)
+    await urls2 = xpath_url(html)
+    await urls1 = get_script(html)
+    task = ur
 
 
 def main_n(n):
