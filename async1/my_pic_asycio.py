@@ -100,7 +100,7 @@ def task_imgs(imgs):
 
 if __name__ == '__main__':
     base_url = 'https://www.tooopen.com/img/88_879_1_{}.aspx'
-    tasks = task_htmls_girls(base_url,10)
+    tasks = task_htmls_girls(base_url,3)
     loop = asyncio.get_event_loop()
     htmls = loop.run_until_complete(asyncio.wait(tasks))
     tasks1 = task_urls(htmls)
