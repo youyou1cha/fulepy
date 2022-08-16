@@ -8,6 +8,8 @@ import json
 import asyncio
 import aiohttp
 import aiofiles
+from io import BytesIO
+from PIL import Image
 
 # 定义架构
 
@@ -65,8 +67,10 @@ async def get_img(img_url, ref_url):
         imgs['filename'] = filename
         imgs['content'] = content
         path = os.path.join(base_dir,filename)
-        with open(path,'wb') as f:
-            f.write(content)
+        # with open(path,'wb') as f:
+        #     f.write(content)
+        img = Image.open(BytesIO(content))
+        img.save(path)
     return imgs
 
 
@@ -100,7 +104,7 @@ def task_imgs(imgs):
 
 if __name__ == '__main__':
     base_url = 'https://www.tooopen.com/img/88_879_1_{}.aspx'
-    tasks = task_htmls_girls(base_url,3)
+    tasks = task_htmls_girls(base_url,5)
     loop = asyncio.get_event_loop()
     htmls = loop.run_until_complete(asyncio.wait(tasks))
     tasks1 = task_urls(htmls)
