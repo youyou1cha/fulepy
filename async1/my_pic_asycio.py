@@ -1,183 +1,118 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
-# 测试future方法的threadpool
-import os
 
-import requests
+import os
 from lxml import etree
 import sys
 import json
 import asyncio
+import aiohttp
+import aiofiles
 
-from concurrent import futures
+# 定义架构
 
-MAX_WORKERS = 20
-BASE_DIR = 'img_dowload'
-
-
-def get_url(url):
-    headers = {
-        'user-agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/104.0.5112.81 Safari/537.36 Edg/104.0.1293.54'
-    }
-    res = requests.get(url=url, headers=headers)
-    return res.text
+# 第一个页面，返回子页面url
+headers = {
+    'user-agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/104.0.5112.81 Safari/537.36 Edg/104.0.1293.54'
+}
+base_dir = 'imgs'
 
 
-def get_html(text):
-    html = etree.HTML(text)
-    return html
-
-
-def get_script(html):
-    # url_list = []
-    parse_script_list = html.xpath('//*[@id="data-more"]/text()')
-    for p in parse_script_list:
-        d = json.loads(p)
-        return [p['url'] for p in d]
-
-
-def xpath_url(html):
-    urls_list = []
-    parse_ul_list = html.xpath('//*[@id="container"]/ul/li')
-    for urls in parse_ul_list:
-        parse_li_list = urls.xpath('./div/a')
-        for parse_div_list in parse_li_list:
-            parse_a_list = parse_div_list.xpath('./@href')
-            for i in parse_a_list:
-                if i.endswith('.html'):
-                    # print(i)
-                    urls_list.append(i)
+async def get_html_girls(base_url):
+    async with aiohttp.ClientSession(headers=headers) as session:
+        async with session.get(base_url, headers=headers) as response:
+            urls_list = []
+            result = await response.text()
+            result = etree.HTML(result)
+        parse_ul_list = result.xpath('//*[@id="container"]/ul/li')
+        for urls in parse_ul_list:
+            parse_li_list = urls.xpath('./div/a')
+            for parse_div_list in parse_li_list:
+                parse_a_list = parse_div_list.xpath('./@href')
+                for i in parse_a_list:
+                    if i.endswith('.html'):
+                        urls_list.append(i)
+        parse_script_list = result.xpath('//*[@id="data-more"]/text()')
+        for p in parse_script_list:
+            d = json.loads(p)
+            for p in d:
+                urls_list.append(p['url'])
     return urls_list
 
 
-# 获取第一页的htmls
-def get_htmls(base_url):
-    text = get_url(url=base_url)
-    html = get_html(text)
-    urls2 = xpath_url(html)
-    urls1 = get_script(html)
-    # print(len( urls1 +  urls2))
-    return urls1 + urls2
+# 进入第二个页面
+
+async def get_img_urls(url):
+    async with aiohttp.ClientSession(headers=headers) as session:
+        async with session.get(url, headers=headers) as response:
+            result = await response.text()
+            result = etree.HTML(result)
+        jpg = dict()
+        img = result.xpath('//*[@id="imgView"]/@src')[0]
+        jpg['img_url'] = str(img)
+        jpg['ref_url'] = str(url)
+    return jpg
 
 
-def get_img_url_one(html_url):
-    text = get_url(html_url)
-    html = get_html(text)
-    html_x = html.xpath('//*[@id="imgView"]/@src')[0]
-    return {'ref': str(html_url), 'jpgurl': str(html_x)}
+# 进入img_url 返回content 和filename
+async def get_img(img_url, ref_url):
+    headers['referer'] = ref_url
+    async with aiohttp.ClientSession(headers=headers) as session:
+        async with session.get(img_url, headers=headers) as response:
+            content = await response.read()
+        imgs = dict()
+        filename = img_url.split('/')[-1]
+        imgs['filename'] = filename
+        imgs['content'] = content
+        path = os.path.join(base_dir,filename)
+        with open(path,'wb') as f:
+            f.write(content)
+    return imgs
 
 
-def get_img_url_one2(html_url):
-    text = get_url(html_url)
-    html = get_html(text)
-    html_x = html.xpath('//*[@id="imgView"]/@src')[0]
-    return html_x
+# 传入content，保存图片
+async def save_img(filename, content):
+    path = os.path.join(base_dir, filename)
+    async with aiofiles.open(path, 'wb') as f:
+        f.write(content)
 
+def task_htmls_girls(base_url,n):
+    return [get_html_girls(base_url=base_url.format(n)) for n in range(1,n) ]
 
-# 进入低一些获取全部的jpgurls
-def get_img_urls(htmls_urls):
-    return [get_img_url_one2(a) for a in htmls_urls]
+def task_urls(htmls):
+    task_list = []
+    for i in htmls[0]:
+        for j in i.result():
+            task_list.append(get_img_urls(j))
+    return task_list
+def task_urls2(urls):
+    task_list = []
+    for i in urls[0]:
+        task_list.append(get_img(**i.result()))
+    return task_list
 
-
-def get_img_future(htmls_urls):
-    woker = min(len(htmls_urls), MAX_WORKERS)
-    with futures.ThreadPoolExecutor(woker) as executor:
-        res = executor.map(get_img_url_one2, htmls_urls)
-    return list(res)
-
-
-def download_one(**kwargs):
-    kw = kwargs
-    print(kw)
-    headers = {
-        'user-agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/104.0.5112.81 Safari/537.36 Edg/104.0.1293.54',
-        'referer': kw['ref']
-    }
-    filename = kw['jpgurl'].split('/')[-1]
-    resq = requests.get(kw['jpgurl'], headers=headers)
-    return (resq.content, filename)
-
-
-def download_one2(cc):
-    headers = {
-        'user-agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/104.0.5112.81 Safari/537.36 Edg/104.0.1293.54',
-        'referer': 'https://www.tooopen.com/view/2317533.html'
-    }
-    filename = cc.split('/')[-1]
-    resq = requests.get(cc, headers=headers)
-    save_img(resq.content,filename)
-    show(url)
-    return (resq.content, filename)
-
-
-# 开始下载
-def dowload_many(urls_list):
-    filename_list = []
-    for url in urls_list:
-        content, filename = download_one(**url)
-        ff = save_img(content, filename)
-        show(url)
-        filename_list.append(ff)
-    return filename_list
-
-
-def download_many_future(urls_list):
-    worker = min(len(urls_list), MAX_WORKERS)
-    with futures.ThreadPoolExecutor(worker) as executor:
-        res = executor.map(download_one2, urls_list)
-    return res
-
-
-def save_img(context, filename):
-    path = os.path.join(BASE_DIR, filename)
-    with open(path, 'wb') as f:
-        f.write(context)
-    return filename
-
-
-def show(text):
-    print(text, end=' ')
-    # print(text)
-    sys.stdout.flush()
-
-
-def main():
-    URL = 'https://www.tooopen.com/img/88_878.aspx'
-    htmls_urls = get_htmls(base_url=URL)
-    jpg_list = get_img_urls(htmls_urls=htmls_urls)
-    # print(jpg_list)
-    ff = dowload_many(jpg_list)
-
-# 第一步，获取第一页的url
-async  def main():
-    URL = 'https://www.tooopen.com/img/88_878.aspx'
-    text = get_url(url=URL)
-    html = get_html(text)
-    await urls2 = xpath_url(html)
-    await urls1 = get_script(html)
-    task = ur
-
-
-def main_n(n):
-    # base_url = 'https://www.tooopen.com/img/88_878_1_{}.aspx'
-    base_url = 'https://www.tooopen.com/img/88_879_1_{}.aspx'
-
-    urls = []
-    for i in range(1, n):
-        url = base_url.format(i)
-        htmls_urls = get_htmls(base_url=url)
-
-        # jpg_list = get_img_urls(htmls_urls=htmls_urls)
-        # print(jpg_list)
-        p = get_img_future(htmls_urls=htmls_urls)
-        urls += p
-        print(urls)
-        # # ff = download_many_future(jpg_list)
-        # for i in jpg_list:
-        #     ff = download_many_future(i)
-    print(urls)
-    ff = download_many_future(urls)
-
+def task_imgs(imgs):
+    task_list = []
+    for i in imgs[0]:
+        task_list.append(save_img(**i.result()))
+    return task_list
+# def task_save()
 
 if __name__ == '__main__':
-    main_n(60)
+    base_url = 'https://www.tooopen.com/img/88_879_1_{}.aspx'
+    tasks = task_htmls_girls(base_url,10)
+    loop = asyncio.get_event_loop()
+    htmls = loop.run_until_complete(asyncio.wait(tasks))
+    tasks1 = task_urls(htmls)
+    # tasks1 = [get_img_urls(html) for html in htmls]
+    urls = loop.run_until_complete(asyncio.wait(tasks1))
+    tasks2 = task_urls2(urls)
+    imgs = loop.run_until_complete(asyncio.wait(tasks2))
+    # tasks3 = task_imgs(imgs)
+    # loop.run_until_complete(asyncio.gather(*tasks3))
+    # img_task = []
+    # for i in imgs[0]:
+    #     print(i)
+    # imgs_tasks = [get_img(img_url,ref_url) for img_url,ref_url in urls.values()]
+
+
